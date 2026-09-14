@@ -45,13 +45,21 @@ node dist/index.js --help
 
 - `STREET, CITY, STATE ZIP` and `STREET, CITY, STATE ZIP-ZIP4`
 - `STREET, CITY STATE ZIP` (city and state run together on the last segment)
+- `STREET CITY STATE ZIP` with no commas at all, as long as the street
+  segment ends in a recognizable street-type word (`St`, `Ave`, `Blvd`,
+  `Rd`, ...), optionally followed by a directional (`NW`, `East`, ...)
 - A trailing unit on the street line: `Apt`, `Unit`, `Suite`, `Ste`, `Fl`,
   `Floor`, `Bldg`, `Building`, or a bare `#`
 
 ## Known limitations
 
-- A line with no comma at all is not parsed (marked invalid rather than
-  guessed at).
+- Comma-less lines rely on spotting a street-type word to find the
+  street/city boundary. A line without one (a PO Box, or a street name that
+  doesn't end in a recognized abbreviation) is marked invalid rather than
+  guessed at.
+- For the same reason, a comma-less city name that starts with a
+  directional word - "West Chester", "North Platte" - can be split wrong,
+  since that word looks like part of the street ("... Ave West").
 - US addresses only; no international formats yet.
 
 See the repo issues / commit history for what's planned next.

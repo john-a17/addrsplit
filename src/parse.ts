@@ -14,6 +14,32 @@ const UNIT_PATTERN =
 
 const STATE_ZIP_PATTERN = /^(.*?)\s*\b([A-Za-z]{2})\s+(\d{5})(?:-(\d{4}))?\s*$/;
 
+const COMMALESS_TAIL_PATTERN = /^(.*\S)\s+([A-Za-z]{2})\s+(\d{5})(?:-(\d{4}))?$/;
+
+// Common street-type abbreviations. Used only to find where a street segment
+// ends when there's no comma to mark the boundary - see parseCommaless.
+const STREET_SUFFIXES = new Set([
+  'ST', 'STREET', 'AVE', 'AVENUE', 'BLVD', 'BOULEVARD', 'DR', 'DRIVE',
+  'RD', 'ROAD', 'LN', 'LANE', 'WAY', 'CT', 'COURT', 'PL', 'PLACE',
+  'TER', 'TERR', 'TERRACE', 'PKWY', 'PARKWAY', 'CIR', 'CIRCLE', 'HWY',
+  'HIGHWAY', 'TRL', 'TRAIL', 'LOOP', 'SQ', 'SQUARE', 'ALY', 'ALLEY',
+  'ROW', 'RUN', 'PATH', 'PIKE', 'WALK', 'PLZ', 'PLAZA',
+]);
+
+const DIRECTIONALS = new Set([
+  'N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW',
+  'NORTH', 'SOUTH', 'EAST', 'WEST',
+  'NORTHEAST', 'NORTHWEST', 'SOUTHEAST', 'SOUTHWEST',
+]);
+
+const UNIT_KEYWORDS = new Set([
+  'APT', 'APARTMENT', 'UNIT', 'SUITE', 'STE', 'FL', 'FLOOR', 'BLDG', 'BUILDING',
+]);
+
+function normalizeWord(word: string): string {
+  return word.replace(/\.$/, '').toUpperCase();
+}
+
 function emptyResult(raw: string): ParsedAddress {
   return {
     raw,
@@ -55,9 +81,81 @@ function splitStateZip(
   };
 }
 
-// Handles the common "STREET, CITY, STATE ZIP" shape, and the looser
-// "STREET, CITY STATE ZIP" shape where the last comma was dropped. A line
-// with no comma at all isn't handled yet - see README roadmap.
+// A comma-less line has no punctuation to mark where the street segment
+// ends, so we fall back to recognizing a trailing state + zip and then a
+// street-type word (St, Ave, Blvd, ...) to find the street/city boundary.
+// A directional right after the suffix ("Ave NW") is kept with the street;
+// anything past that is the city. This is a heuristic, not a gazetteer, so
+// a city name that happens to start with a directional word (e.g. "West
+// Chester") will be split wrong - see README limitations.
+function parseCommaless(raw: string): ParsedAddress {
+  const tailMatch = raw.match(COMMALESS_TAIL_PATTERN);
+  if (!tailMatch) {
+    return emptyResult(raw);
+  }
+
+  const state = tailMatch[2].toUpperCase();
+  const zip = tailMatch[3];
+  const zip4 = tailMatch[4] ?? null;
+  const words = tailMatch[1].split(/\s+/);
+
+  let suffixIndex = -1;
+  for (let i = 0; i < words.length; i++) {
+    if (STREET_SUFFIXES.has(normalizeWord(words[i]))) {
+      suffixIndex = i;
+      break;
+    }
+  }
+  if (suffixIndex === -1 || suffixIndex === words.length - 1) {
+    return emptyResult(raw);
+  }
+
+  let streetEnd = suffixIndex;
+  let cursor = suffixIndex + 1;
+
+  if (cursor < words.length && DIRECTIONALS.has(normalizeWord(words[cursor]))) {
+    streetEnd = cursor;
+    cursor++;
+  }
+
+  let unit: string | null = null;
+  if (cursor < words.length) {
+    const word = words[cursor];
+    if (word === '#' && cursor + 1 < words.length) {
+      unit = words[cursor + 1].toUpperCase();
+      cursor += 2;
+    } else if (word.startsWith('#') && word.length > 1) {
+      unit = word.slice(1).toUpperCase();
+      cursor += 1;
+    } else if (UNIT_KEYWORDS.has(normalizeWord(word)) && cursor + 1 < words.length) {
+      unit = words[cursor + 1].toUpperCase();
+      cursor += 2;
+    }
+  }
+
+  const cityWords = words.slice(cursor);
+  if (cityWords.length === 0) {
+    return emptyResult(raw);
+  }
+
+  const street = words.slice(0, streetEnd + 1).join(' ');
+  const city = cityWords.join(' ');
+
+  return {
+    raw,
+    street,
+    unit,
+    city,
+    state,
+    zip,
+    zip4,
+    valid: true,
+  };
+}
+
+// Handles the common "STREET, CITY, STATE ZIP" shape, the looser
+// "STREET, CITY STATE ZIP" shape where the last comma was dropped, and (via
+// parseCommaless) lines with no comma at all.
 export function parseAddress(line: string): ParsedAddress {
   const raw = line.trim();
   if (!raw) {
@@ -70,7 +168,7 @@ export function parseAddress(line: string): ParsedAddress {
     .filter((p) => p.length > 0);
 
   if (parts.length < 2) {
-    return emptyResult(raw);
+    return parseCommaless(raw);
   }
 
   const last = parts[parts.length - 1];
