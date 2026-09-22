@@ -41,6 +41,19 @@ npx tsc
 node dist/index.js --help
 ```
 
+## Testing
+
+Tests run against the compiled output with Node's built-in test runner (no
+test framework dependency):
+
+```
+npm test
+```
+
+`test/parse.test.js` is a table of fixture lines covering each address shape
+in "What it currently handles" below, plus the known-wrong split described
+in "Known limitations".
+
 ## What it currently handles
 
 - `STREET, CITY, STATE ZIP` and `STREET, CITY, STATE ZIP-ZIP4`
